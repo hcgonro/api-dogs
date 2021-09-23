@@ -2,9 +2,13 @@ package com.tutorial.apiprueba.controllers;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpStatus;
+import org.springframework.hateoas.CollectionModel;
+import org.springframework.hateoas.EntityModel;
+import org.springframework.hateoas.IanaLinkRelations;
+import org.springframework.hateoas.server.mvc.WebMvcLinkBuilder;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -14,65 +18,97 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.tutorial.apiprueba.exceptions.DogTypeNotFoundException;
 import com.tutorial.apiprueba.models.DogType;
 import com.tutorial.apiprueba.models.NewDogType;
 import com.tutorial.apiprueba.repositories.DogTypeRepository;
+import com.tutorial.apiprueba.utils.DogTypeModelAssembler;
 
 @RestController
 public class DogTypeController {
 	
 	@Autowired
 	private DogTypeRepository dogTypeRepository;
+	
+	DogTypeModelAssembler dogTypeModelAssembler;
+	
+	DogTypeController(DogTypeRepository dogTypeRepository, DogTypeModelAssembler dogTypeModelAssembler) {
+		this.dogTypeRepository = dogTypeRepository;
+		this.dogTypeModelAssembler = dogTypeModelAssembler;
+	}
 
 	@GetMapping(path="dogs/types")
-	public ResponseEntity<List<DogType>> listDogTypes() {
+	public CollectionModel<EntityModel<DogType>> listDogTypes() {
 		
-		return new ResponseEntity<>(dogTypeRepository.findAll(), HttpStatus.OK);
+		List<EntityModel<DogType>> dogTypes = dogTypeRepository.findAll()
+				.stream()
+				.map(dogTypeModelAssembler::toModel)
+				.collect(Collectors.toList());
+		
+		return CollectionModel.of(dogTypes,
+				WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(DogTypeController.class).listDogTypes()).withSelfRel());
 	}
 	
 	@GetMapping(path="dogs/types/{id}")
-	public ResponseEntity<DogType> getDogType(@PathVariable int id) {
+	public EntityModel<DogType> getDogType(@PathVariable int id) {
 		
-		Optional<DogType> dogTypeOptional = dogTypeRepository.findById(id);
-		if(dogTypeOptional.isPresent()) {
-			return new ResponseEntity<>(dogTypeOptional.get(), HttpStatus.OK);
-		} else {
-			return new ResponseEntity<>(HttpStatus.NOT_FOUND);
-		}
+		DogType dogType = dogTypeRepository.findById(id)
+				.orElseThrow();
+		
+		return dogTypeModelAssembler.toModel(dogType);
 	}
 	
 	@PostMapping(path="dogs/types")
-	public ResponseEntity<DogType> createDogType(@RequestBody NewDogType newDogType) {
+	public ResponseEntity<EntityModel<DogType>> createDogType(@RequestBody NewDogType newDogType) {
 		
 		DogType persistedDogType = new DogType(newDogType);
-		return new ResponseEntity<>(dogTypeRepository.save(persistedDogType), HttpStatus.OK);
+		
+		EntityModel<DogType> entityModel = dogTypeModelAssembler.toModel(dogTypeRepository.save(persistedDogType));
+		
+		return ResponseEntity
+			.created(entityModel.getRequiredLink(IanaLinkRelations.SELF).toUri())
+			.body(entityModel);
 	}
 	
 	@PutMapping("dogs/types/{id}")
-	public ResponseEntity<DogType> updateDogType(@RequestBody NewDogType newDogType, @PathVariable int id) {
+	public ResponseEntity<EntityModel<DogType>> updateDogType(@RequestBody NewDogType newDogType, @PathVariable int id) {
+
+		EntityModel<DogType> entityModel;
+		ResponseEntity<EntityModel<DogType>> responseEntity;
 		DogType persistedDogType;
+		
+		Optional<DogType> persistedDogTypeOptional = dogTypeRepository.findById(id);
+		
+		if(persistedDogTypeOptional.isPresent()) {
+			persistedDogType = persistedDogTypeOptional.get();
 			
-		Optional<DogType> dogTypeOptional = dogTypeRepository.findById(id);
-		if(dogTypeOptional.isPresent()) {
-			persistedDogType = dogTypeOptional.get();
-			persistedDogType.updateDogType(newDogType);
+			entityModel = dogTypeModelAssembler.toModel(dogTypeRepository.save(persistedDogType));
+			responseEntity = ResponseEntity
+					.ok()
+					.body(entityModel);
 		} else {
 			persistedDogType = new DogType(newDogType);
+			
+			entityModel = dogTypeModelAssembler.toModel(dogTypeRepository.save(persistedDogType));
+			responseEntity = ResponseEntity
+					.created(entityModel.getRequiredLink(IanaLinkRelations.SELF).toUri())
+					.body(entityModel);
 		}
 		
-		return new ResponseEntity<>(dogTypeRepository.save(persistedDogType), HttpStatus.OK);
+		return responseEntity;
 	}
 	
 	@DeleteMapping(path="dogs/types/{id}")
-	public ResponseEntity<DogType> deleteDogType(@PathVariable int id) {
+	public ResponseEntity<String> deleteDogType(@PathVariable int id) {
 		
-		Optional<DogType> dogTypeOptional = dogTypeRepository.findById(id);
-		if(dogTypeOptional.isPresent()) {
-			dogTypeRepository.delete(dogTypeOptional.get());
-			return new ResponseEntity<>(HttpStatus.OK);
-		} else {
-			return new ResponseEntity<>(HttpStatus.NOT_FOUND);
-		}
+		DogType dogType = dogTypeRepository.findById(id)
+			.orElseThrow(() -> new DogTypeNotFoundException(id));
+			
+		dogTypeRepository.deleteById(dogType.getId());
+		
+		return ResponseEntity
+			.ok()
+			.body("Dog type " +id+ " has been removed succesfully");
 	}
 
 }
